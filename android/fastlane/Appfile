@@ -1,0 +1,2 @@
+json_key_file('/Users/appsketiers/builds/Uxhs_EzoJ/0/react-native/medidoctorapp/android/fastlane/google-play-key.json')
+package_name('com.medidoctor.app')

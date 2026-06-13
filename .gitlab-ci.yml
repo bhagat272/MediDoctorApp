@@ -1,0 +1,155 @@
+stages:
+  - build
+  - android_deploy
+  - ios_deploy
+ 
+variables:
+  LANG: en_US.UTF-8
+  LC_ALL: en_US.UTF-8
+  ANDROID_HOME: "$HOME/Library/Android/sdk"
+  ANDROID_SDK_ROOT: "$HOME/Library/Android/sdk"
+ 
+default:
+  tags:
+    - mac-ci-build
+  before_script:
+    # ------------------------------
+    # Save Google Play JSON key
+    # ------------------------------
+    - mkdir -p android/fastlane
+    - printf "%s" "$GOOGLE_PLAY_JSON_KEY" > android/fastlane/google-play-key.json
+    - export GOOGLE_PLAY_KEY_FILE="$CI_PROJECT_DIR/android/fastlane/google-play-key.json"
+ 
+    # ------------------------------
+    # PATH FIX (Mac M1/M2 Homebrew)
+    # ------------------------------
+    - export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+    - export PATH="$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin"
+ 
+    # ------------------------------
+    # Node install
+    # ------------------------------
+    - brew install node || true
+   # - npm install
+    - npm install -f
+ 
+    # ------------------------------
+    # Java 17 for Android
+    # ------------------------------
+    - brew install openjdk@17 || true
+    - export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+    - export PATH="$JAVA_HOME/bin:$PATH"
+    - java -version
+ 
+# ============================================================
+# ANDROID BUILD
+# ============================================================
+android_build:
+  stage: build
+  tags:
+    - mac-ci-build
+  script:
+    - mkdir -p "$ANDROID_HOME"
+    - echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+ 
+    - yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+ 
+    # Ruby 3.2.2 + Bundler
+    - brew install rbenv ruby-build || true
+    - eval "$(rbenv init - bash)"
+    - rbenv install 3.2.2 -s
+    - rbenv global 3.2.2
+   # - gem install bundler
+    - gem install bundler -v 2.7.2
+ 
+    - cd android
+  #  - bundle install
+  #  - bundle exec fastlane deploy_android
+    - bundle _2.7.2_ install
+    - bundle exec fastlane deploy_android
+ 
+    - ls -lh app/build/outputs/apk/release || true
+    - ls -lh app/build/outputs/bundle/release || true
+ 
+  artifacts:
+    paths:
+      - android/app/build/outputs/apk/release/*.apk
+      - android/app/build/outputs/bundle/release/*.aab
+    expire_in: 1 week
+ 
+  only:
+    - main
+  when: manual
+ 
+ios_build:
+  stage: ios_deploy
+  tags:
+    - mac-ci-build
+ 
+  script:
+    - echo "🧹 Cleaning old builds..."
+    - rm -rf ios/build ios/Pods
+ 
+    # ------------------------------
+    # Xcode Setup
+    # ------------------------------
+    - xcode-select -switch /Applications/Xcode.app/Contents/Developer || true
+    - xcode-select -p
+    - xcodebuild -version
+ 
+    # ------------------------------
+    # Install Ruby
+    # ------------------------------
+    - brew install rbenv ruby-build || true
+    - eval "$(rbenv init - bash)"
+    - rbenv install 3.2.2 -s
+    - rbenv global 3.2.2
+    - ruby -v
+ 
+    # ======================================================
+    # 🔥 BUNDLER FIX — Remove Bundler 4, Install Bundler 2.4.10
+    # ======================================================
+    - gem uninstall bundler -a -x -v 4.0.0 || true
+    - gem uninstall bundler -a -x -v 4.1.0 || true
+    - gem install bundler -v 2.4.10
+    - bundle _2.4.10_ -v
+ 
+    # ------------------------------
+    # Install Fastlane
+    # ------------------------------
+    - gem install fastlane -N
+ 
+    # ------------------------------
+    # Install Pods
+    # ------------------------------
+    - cd ios
+    - gem install cocoapods -v 1.16.2 --no-document
+    - pod install --repo-update
+    #- cd ..
+ 
+    # ------------------------------
+    # Install Ruby Gems (with Bundler 2.4.10)
+    # ------------------------------
+    - bundle _2.4.10_ install
+ 
+    # ------------------------------
+    # Run Fastlane
+    # ------------------------------
+    - bundle _2.4.10_ exec fastlane beta_and_upload
+ 
+    # ------------------------------
+    # IPA Output
+    # ------------------------------
+    - echo "📦 IPA OUTPUT:"
+    - ls -lh ios/build || echo "IPA not found"
+ 
+  artifacts:
+    name: "ios-artifacts-$CI_PIPELINE_ID"
+    paths:
+      - ios/build/*.ipa
+      - ios/fastlane/logs/*
+    expire_in: 2 weeks
+ 
+  only:
+    - main
+  when: manual

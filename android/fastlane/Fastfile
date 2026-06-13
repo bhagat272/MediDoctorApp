@@ -1,0 +1,57 @@
+default_platform(:android)
+ 
+platform :android do
+  lane :deploy_android do
+    begin
+      # 1. Get version codes from Google Play
+      current_version_codes = google_play_track_version_codes(
+        track: 'internal',
+        json_key: ENV['GOOGLE_PLAY_KEY_FILE']
+      )
+ 
+      latest_version_code = current_version_codes.max || 1
+      new_version_code = latest_version_code + 1
+      new_version_name = "1.0.#{new_version_code}"
+ 
+      puts("🔢 Latest Play Store versionCode: #{latest_version_code}")
+      puts("🚀 New versionCode: #{new_version_code}, versionName: #{new_version_name}")
+ 
+      # 2. Clean
+      gradle(task: "clean")
+ 
+      # 3. Build AAB with injected version
+      gradle(
+        task: "bundle",
+        build_type: "release",
+        properties: {
+          "android.injected.version.code" => new_version_code,
+          "android.injected.version.name" => new_version_name
+        }
+      )
+ 
+      # 4. Verify AAB version
+      aab_path = lane_context[:GRADLE_AAB_OUTPUT_PATH]
+ 
+      sh("curl -L -o bundletool.jar https://github.com/google/bundletool/releases/download/1.15.6/bundletool-all-1.15.6.jar") unless File.exist?("bundletool.jar")
+ 
+      version_info = sh("java -jar bundletool.jar dump manifest --bundle=#{aab_path}")
+      puts version_info
+ 
+      version_code = version_info[/versionCode="(\d+)"/, 1]
+      puts("📦 FINAL AAB versionCode: #{version_code}")
+ 
+      # 5. Upload to Google Play Internal
+      upload_to_play_store(
+        track: 'internal',
+        json_key: ENV['GOOGLE_PLAY_KEY_FILE'],
+        aab: aab_path,
+        skip_upload_metadata: true,
+        release_status: 'draft'
+      )
+ 
+    rescue => e
+      UI.error("❌ Deployment failed: #{e.message}")
+      raise
+    end
+  end
+end
